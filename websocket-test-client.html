@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test Client</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .messages {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .message {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background-color: white;
+            border-left: 4px solid #007bff;
+        }
+        .message.received {
+            border-left-color: #28a745;
+        }
+        .message.error {
+            border-left-color: #dc3545;
+            background-color: #fff5f5;
+        }
+        .message-time {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .message-type {
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 WebSocket Test Client</h1>
+
+        <div id="status" class="status disconnected">
+            🔴 Disconnected
+        </div>
+
+        <div class="input-group">
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" value="http://localhost:3000" placeholder="http://localhost:3000">
+        </div>
+
+        <div class="input-group">
+            <label for="token">JWT Access Token:</label>
+            <input type="text" id="token" placeholder="Paste your JWT token here">
+        </div>
+
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <button onclick="clearMessages()">Clear Messages</button>
+
+        <hr style="margin: 30px 0;">
+
+        <h2>Send Message</h2>
+        <div class="input-group">
+            <label for="messageText">Message:</label>
+            <textarea id="messageText" rows="3" placeholder="Type your message here"></textarea>
+        </div>
+        <button onclick="sendMessage()" id="sendBtn" disabled>Send Message</button>
+
+        <hr style="margin: 30px 0;">
+
+        <h2>📨 Messages</h2>
+        <div id="messages" class="messages"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let userId = null;
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const sendBtn = document.getElementById('sendBtn');
+
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = '🟢 Connected' + (userId ? ` (User ID: ${userId})` : '');
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendBtn.disabled = false;
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '🔴 Disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendBtn.disabled = true;
+                userId = null;
+            }
+        }
+
+        function addMessage(type, data, isError = false) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message' + (isError ? ' error' : '');
+
+            const typeDiv = document.createElement('div');
+            typeDiv.className = 'message-type';
+            typeDiv.textContent = type;
+
+            const contentDiv = document.createElement('pre');
+            contentDiv.textContent = JSON.stringify(data, null, 2);
+            contentDiv.style.margin = '5px 0';
+            contentDiv.style.whiteSpace = 'pre-wrap';
+
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'message-time';
+            timeDiv.textContent = new Date().toLocaleTimeString();
+
+            messageDiv.appendChild(typeDiv);
+            messageDiv.appendChild(contentDiv);
+            messageDiv.appendChild(timeDiv);
+
+            messagesDiv.insertBefore(messageDiv, messagesDiv.firstChild);
+        }
+
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const token = document.getElementById('token').value;
+
+            if (!token) {
+                alert('Please enter a JWT token');
+                return;
+            }
+
+            socket = io(serverUrl, {
+                auth: { token: token }
+            });
+
+            socket.on('connected', (data) => {
+                console.log('Connected:', data);
+                userId = data.userId;
+                updateStatus(true);
+                addMessage('✅ CONNECTED', data);
+            });
+
+            socket.on('error', (error) => {
+                console.error('Error:', error);
+                addMessage('❌ ERROR', error, true);
+                updateStatus(false);
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected');
+                addMessage('🔌 DISCONNECTED', { message: 'Connection closed' });
+                updateStatus(false);
+            });
+
+            socket.on('messageReceived', (data) => {
+                console.log('Message received:', data);
+                addMessage('📨 MESSAGE RECEIVED', data);
+            });
+
+            socket.on('notification', (data) => {
+                console.log('Notification:', data);
+                addMessage('🔔 NOTIFICATION', data);
+            });
+
+            socket.on('alert', (data) => {
+                console.log('Alert:', data);
+                addMessage('⚠️ ALERT', data);
+            });
+
+            // Listen to any other events
+            socket.onAny((eventName, ...args) => {
+                if (!['connected', 'error', 'disconnect', 'messageReceived', 'notification', 'alert'].includes(eventName)) {
+                    console.log('Custom event:', eventName, args);
+                    addMessage(`📬 ${eventName.toUpperCase()}`, args[0] || {});
+                }
+            });
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                updateStatus(false);
+            }
+        }
+
+        function sendMessage() {
+            const messageText = document.getElementById('messageText').value;
+
+            if (!messageText.trim()) {
+                alert('Please enter a message');
+                return;
+            }
+
+            if (socket && socket.connected) {
+                socket.emit('message', {
+                    message: messageText,
+                    timestamp: new Date().toISOString()
+                });
+                addMessage('📤 SENT', { message: messageText });
+                document.getElementById('messageText').value = '';
+            } else {
+                alert('Not connected to server');
+            }
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        // Initialize
+        updateStatus(false);
+    </script>
+</body>
+</html>
