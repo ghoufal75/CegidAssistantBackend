@@ -12,6 +12,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { GatewayService } from './gateway.service';
+import { OpenAIService } from './openai.service';
 
 @Injectable()
 @WebSocketGateway({
@@ -30,6 +31,7 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private jwtService: JwtService,
     private configService: ConfigService,
     private gatewayService: GatewayService,
+    private openAIService: OpenAIService,
   ) {}
 
   /**
@@ -103,7 +105,7 @@ console.log(token);
    * Listen for messages from clients
    */
   @SubscribeMessage('message')
-  handleMessage(
+  async handleMessage(
     @MessageBody() data: { content: string; [key: string]: any },
     @ConnectedSocket() client: Socket,
   ) {
@@ -112,21 +114,38 @@ console.log(token);
 
     this.logger.log(`Message received from ${username} (${userId}): ${data.content}`);
 
-    // Echo back to the sender with acknowledgment
+    // Echo back to the sender with acknowledgment (user message)
     client.emit('messageReceived', {
         ...data,
         id: data.timestamp,
         type: 'user',
     });
-    
-    client.emit('messageReceived', {
-        content: 'Hello Moaad Msellek',
-        timestamp: new Date(),
-        id: data.timestamp,
+
+    try {
+      // Get response from OpenAI
+      const aiResponse = await this.openAIService.getChatCompletion(data.content);
+
+      // Send AI response back to the user
+      client.emit('messageReceived', {
+        content: aiResponse,
+        timestamp: new Date().toISOString(),
+        id: Date.now(),
         type: 'bot',
-    });
-    // You can add custom logic here to process the message
-    // For example, save to database, trigger actions, etc.
+      });
+
+      this.logger.log(`AI response sent to ${username} (${userId})`);
+    } catch (error) {
+      this.logger.error(`Error getting AI response: ${error.message}`);
+
+      // Send error message to user
+      client.emit('messageReceived', {
+        content: 'Sorry, I encountered an error processing your message. Please try again.',
+        timestamp: new Date().toISOString(),
+        id: Date.now(),
+        type: 'bot',
+        error: true,
+      });
+    }
   }
 
   /**
