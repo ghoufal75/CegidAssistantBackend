@@ -16,7 +16,7 @@ import { GatewayService } from './gateway.service';
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: '*',
     credentials: true,
   },
 })
@@ -41,6 +41,7 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const token =
         client.handshake.auth.token ||
         client.handshake.headers.authorization?.split(' ')[1];
+console.log(token);
 
       if (!token) {
         this.logger.warn(`Client ${client.id} connection rejected: No token provided`);
@@ -74,6 +75,8 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect {
         socketId: client.id,
       });
     } catch (error) {
+      console.log("error token : ",error);
+      
       this.logger.warn(
         `Client ${client.id} connection rejected: Invalid token`,
       );
@@ -101,24 +104,27 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   @SubscribeMessage('message')
   handleMessage(
-    @MessageBody() data: { message: string; [key: string]: any },
+    @MessageBody() data: { content: string; [key: string]: any },
     @ConnectedSocket() client: Socket,
   ) {
     const userId = client.data.userId;
     const username = client.data.username;
 
-    this.logger.log(`Message received from ${username} (${userId}): ${data.message}`);
+    this.logger.log(`Message received from ${username} (${userId}): ${data.content}`);
 
     // Echo back to the sender with acknowledgment
     client.emit('messageReceived', {
-      success: true,
-      message: 'Message received by server',
-      data: {
-        receivedMessage: data.message,
-        timestamp: new Date().toISOString(),
-      },
+        ...data,
+        id: data.timestamp,
+        type: 'user',
     });
-
+    
+    client.emit('messageReceived', {
+        content: 'Hello Moaad Msellek',
+        timestamp: new Date(),
+        id: data.timestamp,
+        type: 'bot',
+    });
     // You can add custom logic here to process the message
     // For example, save to database, trigger actions, etc.
   }
